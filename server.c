@@ -1,7 +1,131 @@
 #include "library/library.h"
 
-void addUser(const char *username,unsigned int port){
-	printf("Si e' aggiunto %s sulla porta %d\n",username,port);
+typedef struct user{
+	char *username;
+	int port;
+	struct user *next;
+	unsigned int status;
+	int sock;
+} user;
+
+
+user *user_list; 
+int n_users;
+
+fd_set master;
+
+user* searchUserByName(char *username){
+	user *tmp = user_list;	
+	while(tmp != NULL){
+		if(strcmp(tmp->username,username) == 0){
+			return tmp;
+		}	
+	
+		tmp = tmp->next;
+	}
+
+	return NULL;
+}
+
+user* searchUserBySocket(int sock){
+	user *tmp = user_list;	
+
+	while(tmp != NULL){
+		if(tmp->sock == sock){
+			return tmp;
+		}	
+	
+		tmp = tmp->next;
+	}
+
+	return NULL;
+
+}
+
+int existingUsername(const char *username){
+
+	user *root = user_list;
+	while(root != NULL){
+		if(strcmp(root->username,username)==0){
+			return true;
+		}
+		root = root->next;
+	}
+	return false;
+}
+
+void addUser(char *username,unsigned int port,int sock){
+	user *new_user = malloc(sizeof(user));		
+	new_user->username = username;
+	new_user->port = port;	
+	new_user->next = NULL;
+	new_user->status = FREE;
+	new_user->sock = sock;
+
+	n_users++;
+
+	if(user_list == NULL){
+		user_list = new_user;
+		return;	
+	}	
+
+	user *tmp = user_list;
+	while( tmp->next != NULL){
+		tmp = tmp->next;
+	}
+	tmp->next = new_user;
+
+}
+
+void removeUser(int sock){
+
+	user *tmp = user_list;
+	user *prec = NULL;
+
+	while(tmp != NULL){
+		if(tmp->sock == sock){
+			break;
+		}	
+	
+		prec = tmp;
+		tmp = tmp->next;
+	}
+	
+	FD_CLR(sock,&master);
+	close(sock);
+
+	if(tmp == NULL){
+		return;	
+	}
+
+	n_users--;
+
+	printf("%s si e' disconnesso\n",tmp->username);
+
+	if(tmp == user_list){
+		user_list = user_list->next;
+		free(tmp->username);
+		free(tmp);
+		return;
+	}
+
+	prec->next = tmp->next;
+	free(tmp);
+
+}
+
+void who_function(int sock){
+
+	if(!sendInt(sock,n_users)) return;
+	
+	user *tmp = user_list;	
+	while(tmp != NULL){
+		if(!sendString(sock,tmp->username)) 	return;
+		if(!sendInt(sock,tmp->status))		return;		
+
+		tmp = tmp->next;
+	}
+
 }
 
 void login_function(int sock){
@@ -17,10 +141,60 @@ void login_function(int sock){
 	
 	if(!recvInt(sock,&port)){
 		printf("Errore\n");
-		exit(1);
+	}
+	
+	if(existingUsername(username) || port < 0){
+		if(!sendInt(sock,LOGIN_FAIL)) 	return;
+		return;
+	}	
+
+	addUser(username,port,sock);
+	if(!sendInt(sock,LOGIN_OK))		return;
+
+	printf("%s si e' connesso\n",username);
+	printf("%s e' libero\n",username);
+}
+
+void quit_function(int sock){
+
+	removeUser(sock);
+
+}
+
+void connect_function(int sock){
+
+	char *username;
+	user *me,*him;
+
+	username = recvString(sock);
+	if(username == NULL)				return;	
+
+	me = searchUserBySocket(sock);			//se stesso
+	me->status = CONNECTING;
+	
+	if(strcmp(username,me->username) == 0){		//connessione a se stessi
+		if(!sendInt(sock,CONNECT_NOUSER))	return;
+		return;
 	}
 
-	addUser(username,port);
+	
+	him = searchUserByName(username);
+
+	if(him == NULL){
+		me->status = FREE;
+		if(!sendInt(sock,CONNECT_NOUSER))		return;
+		return;
+	}
+
+	if(him->status == CONNECTING || him->status == BUSY){
+		me->status = FREE;
+		if(!sendInt(sock,CONNECT_BUSY))		return;
+		return;
+	}
+
+	if(!sendInt(him->sock,CONNECT_REQ))		return;
+	if(!sendString(him->sock,me->username))		return;
+			
 
 }
 
@@ -30,8 +204,16 @@ void select_command(int cmd,int sock){
 		case LOGIN_COMMAND:
 			login_function(sock);
 			break;
-	
-	}
+		case WHO_COMMAND:
+			who_function(sock);
+			break;
+		case QUIT_COMMAND:
+			quit_function(sock);	
+			break;
+		case CONNECT_COMMAND:
+			connect_function(sock);
+			break;		
+		}
 
 
 }
@@ -51,13 +233,15 @@ int main(int argc,char **argv){
 	unsigned int addrlen;
 	int i,status,new_sock;
 	int cmd;
-	fd_set master,read_fds;
+	fd_set read_fds;
 		
 	/*if(porta < 0){
 		pritnf("[Errore] porta errata");
 		exit(-1);
 	}*/
 
+	user_list = NULL;
+	n_users = 0;
 
 	listener = socket(AF_INET, SOCK_STREAM, 0);
 	if(listener < 0){
@@ -97,7 +281,7 @@ int main(int argc,char **argv){
 		read_fds = master;
 		if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){
 			perror("[Errore] Select");
-			exit(1);
+			exit(-1);
 		}
 
 		for(i = 0; i <= fdmax; i++){
@@ -116,9 +300,10 @@ int main(int argc,char **argv){
 					printf("Connessione stabilita con il client\n");
 
 				} else {				//qualcuno vuole scrivere
+
 					status = recvInt(i,&cmd);
 					if(status == false){
-						//disconnesso;					
+						removeUser(i);				
 					} else {
 						select_command(cmd,i);
 					}
