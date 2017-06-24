@@ -2,10 +2,14 @@
 
 typedef struct user{
 	char *username;
+	char ip[INET_ADDRSTRLEN];
 	int port;
 	struct user *next;
 	unsigned int status;
 	int sock;
+	
+	struct user *pending_request;
+
 } user;
 
 
@@ -54,13 +58,15 @@ int existingUsername(const char *username){
 	return false;
 }
 
-void addUser(char *username,unsigned int port,int sock){
+void addUser(char *username,unsigned int port,int sock,struct sockaddr_in socket_full){
 	user *new_user = malloc(sizeof(user));		
 	new_user->username = username;
 	new_user->port = port;	
 	new_user->next = NULL;
 	new_user->status = FREE;
 	new_user->sock = sock;
+
+	inet_ntop(AF_INET,&socket_full.sin_addr,new_user->ip,INET_ADDRSTRLEN);		//converto l'ip 
 
 	n_users++;
 
@@ -128,14 +134,14 @@ void who_function(int sock){
 
 }
 
-void login_function(int sock){
+void login_function(int sock,struct sockaddr_in socket_full){
 
 	char *username;
 	int port;
 
 	username = recvString(sock);
 	if(username == NULL){
-		printf("NULL\n");
+		printf("Username non ricevuto\n");
 		//gestione errore
 	}
 	
@@ -148,7 +154,7 @@ void login_function(int sock){
 		return;
 	}	
 
-	addUser(username,port,sock);
+	addUser(username,port,sock,socket_full);
 	if(!sendInt(sock,LOGIN_OK))		return;
 
 	printf("%s si e' connesso\n",username);
@@ -165,6 +171,7 @@ void connect_function(int sock){
 
 	char *username;
 	user *me,*him;
+	int status;
 
 	username = recvString(sock);
 	if(username == NULL)				return;	
@@ -178,7 +185,7 @@ void connect_function(int sock){
 	}
 
 	
-	him = searchUserByName(username);
+	him = searchUserByName(username);		//non esiste
 
 	if(him == NULL){
 		me->status = FREE;
@@ -186,23 +193,65 @@ void connect_function(int sock){
 		return;
 	}
 
-	if(him->status == CONNECTING || him->status == BUSY){
+	if(him->status == CONNECTING || him->status == BUSY){		//occupato
 		me->status = FREE;
 		if(!sendInt(sock,CONNECT_BUSY))		return;
 		return;
 	}
 
+	him->pending_request = me;
+
+	printf("%s vuole connettersi a %s\n",me->username,him->username);
+
 	if(!sendInt(him->sock,CONNECT_REQ))		return;
 	if(!sendString(him->sock,me->username))		return;
-			
+
+
+
+
+	//butto la pietra, aspetto rispost
 
 }
 
-void select_command(int cmd,int sock){
+
+void connect_answer(int sock){
+
+	user *me,*him;
+	int status;
+
+	me = searchUserBySocket(sock);
+
+	him = me->pending_request;
+
+	if(!recvInt(him->sock,&status))			return;
+	
+	if(status == CONNECT_ACPT){
+		him->status = me->status = BUSY;		
+		
+		if(!sendInt(sock,CONNECT_ACPT))		return;		//avviso che ha accettato la partita
+		if(!sendString(sock,him->ip))		return;		//mando a lui l'ip
+		if(!sendInt(sock,him->port))		return;		//mando la porta		
+
+
+		if(!sendString(him->sock,me->ip))	return;		
+		if(!sendInt(him->sock,me->port))	return;
+
+	} else if(status == CONNECT_RFSD){
+		him->status = me->status = FREE;		
+		if(!sendInt(sock,CONNECT_REFUSED))	return;
+
+	}
+
+
+	me->pending_request = NULL;
+
+}
+
+void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 
 	switch (cmd){
 		case LOGIN_COMMAND:
-			login_function(sock);
+			login_function(sock,socket_full);
 			break;
 		case WHO_COMMAND:
 			who_function(sock);
@@ -212,9 +261,49 @@ void select_command(int cmd,int sock){
 			break;
 		case CONNECT_COMMAND:
 			connect_function(sock);
-			break;		
+			break;	
+		case CONNECT_ANSWER:
+			connect_answer(sock);
+			break;
 		}
 
+
+}
+
+
+int initialize_server(int port){
+	
+	int listener;
+	int status;
+
+	listener = socket(AF_INET, SOCK_STREAM, 0);
+	if(listener < 0){
+		printf("[Errore] socket\n");
+		exit(-1);
+	}
+
+	struct sockaddr_in listenerAddress;
+	memset(&listenerAddress,0,sizeof(listenerAddress));
+	
+	listenerAddress.sin_port = htons(port);
+	listenerAddress.sin_family = AF_INET;
+	inet_pton(AF_INET,"0.0.0.0",&listenerAddress.sin_addr);
+
+
+	status = bind(listener, (struct sockaddr*)& listenerAddress, sizeof(listenerAddress));
+	if(status < 0){
+		perror("[Errore] bind\n");
+		exit(-1);
+	}
+
+	status = listen(listener,10);
+	if(status < 0){
+		perror("[Errore] listen\n");
+		exit(-1);
+	}
+
+
+	return listener;
 
 }
 
@@ -225,11 +314,11 @@ int main(int argc,char **argv){
 		exit(-1);
 	}
 
-	struct sockaddr_in listenerAddress;
+
 	struct sockaddr_in clientAddress;
 
 	int port = atoi(argv[1]);
-	int fdmax,listener;
+	int fdmax,server_socket;
 	unsigned int addrlen;
 	int i,status,new_sock;
 	int cmd;
@@ -243,39 +332,19 @@ int main(int argc,char **argv){
 	user_list = NULL;
 	n_users = 0;
 
-	listener = socket(AF_INET, SOCK_STREAM, 0);
-	if(listener < 0){
-		printf("[Errore] socket\n");
-		exit(-1);
-	}
 
+	memset(&clientAddress,0,sizeof(clientAddress));
 
-	memset(&listenerAddress,0,sizeof(listenerAddress));
-	FD_ZERO(&master);	
-	FD_ZERO(&read_fds);
+	server_socket = initialize_server(port);
 
-	listenerAddress.sin_port = htons(port);
-	listenerAddress.sin_family = AF_INET;
-	listenerAddress.sin_addr.s_addr = INADDR_ANY;
-	
-	status = bind(listener, (struct sockaddr*)& listenerAddress, sizeof(listenerAddress));
-	if(status < 0){
-		perror("[Errore] bind\n");
-		exit(-1);
-	}
-
-	status = listen(listener,10);
-	if(status < 0){
-		perror("[Errore] listen\n");
-		exit(-1);
-	}
-
-	
 	printf("[LOG] Attendo connessioni sulla porta %d\n",port);
 
 	
-	FD_SET(listener,&master);
-	fdmax = listener;
+	FD_ZERO(&master);	
+	FD_ZERO(&read_fds);
+	FD_SET(server_socket,&master);
+
+	fdmax = server_socket;
 	
 	while(true){
 		read_fds = master;
@@ -286,26 +355,28 @@ int main(int argc,char **argv){
 
 		for(i = 0; i <= fdmax; i++){
 			if(FD_ISSET(i,&read_fds)){			
-				if(i==listener){			//qualcuno si vuole connettere
+				if(i==server_socket){			//qualcuno si vuole connettere
+
 					memset(&clientAddress,0,sizeof(clientAddress));
 					addrlen = sizeof(clientAddress);
-					new_sock = accept(listener,(struct sockaddr*)&clientAddress,&addrlen);
+					new_sock = accept(server_socket,(struct sockaddr*)&clientAddress,&addrlen);
 					if(new_sock < 0){
 						perror("[Errore] accept\n");
 						continue;
 					}					
 					FD_SET(new_sock,&master);
-					if(new_sock > fdmax) fdmax = new_sock;
+					if(new_sock > fdmax) 
+						fdmax = new_sock;
 					
 					printf("Connessione stabilita con il client\n");
+					continue;
 
 				} else {				//qualcuno vuole scrivere
-
 					status = recvInt(i,&cmd);
 					if(status == false){
 						removeUser(i);				
 					} else {
-						select_command(cmd,i);
+						select_command(cmd,i,clientAddress);
 					}
 				}
 			}
@@ -313,7 +384,8 @@ int main(int argc,char **argv){
 		}	
 
 	}
-
+	
+	close(server_socket);
 
 	return 0;
 

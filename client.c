@@ -1,6 +1,7 @@
 #include "library/library.h"
 
 fd_set master;
+int socket_udp;
 
 void cmd_help(){
 
@@ -21,11 +22,14 @@ void cmd_help(){
 void cmd_connect(int sock){
 
 	char *username;
+	char *ip;
+	int port;
+
 	int result;
 	scanf("%ms",&username);
 	if(!sendInt(sock,CONNECT_COMMAND))	return;
 	if(!sendString(sock,username))		return;
-	if(!recvInt(sock,&result))		return;
+	/*if(!recvInt(sock,&result))		return;
 
 	switch(result){
 		case CONNECT_NOUSER:
@@ -39,10 +43,23 @@ void cmd_connect(int sock){
 			break;
 		case CONNECT_OK:
 			printf("L'utente ha accettato la partita\n");
-			//chiamata al gioco
+			
+			ip = recvString(sock);	
+			if(ip==NULL)				return;			//ip
+
+			if(!recvInt(sock,&port));		return;			//porta
+
+			printf(">%s:%d\n",ip,port);
+			printf("provo a ricevere UDP\n");
+
+			struct sockaddr_in cl;
+			int ricevuto;
+			//recvUDPInt(socket_udp,&cl,&ricevuto);
+			//printf("ricevuto %d\n",ricevuto);	
+
 			break;
 	}
-
+*/
 }
 
 void cmd_login(int sock,int *sock_client,int *port_client){
@@ -52,11 +69,6 @@ void cmd_login(int sock,int *sock_client,int *port_client){
 	struct sockaddr_in my_addr;
 
 	do{
-
-		if(!sendInt(sock,LOGIN_COMMAND)){ 
-			printf("Errore cmd login\n");
-			return;	
-		}
 	
 		printf("Inserisci il tuo nome: ");
 		fflush(stdout);	
@@ -69,10 +81,10 @@ void cmd_login(int sock,int *sock_client,int *port_client){
 			continue;			
 		}
 
-
-		if(!sendString(sock,buffer)) 	return;
-		if(!sendInt(sock,*port_client))	return;
-		if(!recvInt(sock,&result)) 	return;
+		if(!sendInt(sock,LOGIN_COMMAND))	return;
+		if(!sendString(sock,buffer)) 		return;
+		if(!sendInt(sock,*port_client))		return;
+		if(!recvInt(sock,&result)) 		return;
 		if(result == LOGIN_FAIL){
 			printf("Username gia' in uso\n");
 		}
@@ -80,9 +92,10 @@ void cmd_login(int sock,int *sock_client,int *port_client){
 
 	} while(result != LOGIN_OK);
 
-	//creo socket UDP
 
-	/**sock_client = socket(AF_INET,SOCK_DGRAM,0);
+	//creo server UDP
+
+	*sock_client = socket(AF_INET,SOCK_DGRAM,0);
 	if(*sock_client < 0){
 		perror("Errore socket");
 		exit(-1);
@@ -97,7 +110,7 @@ void cmd_login(int sock,int *sock_client,int *port_client){
 	if(result < 0){
 		perror("Errore bind");
 		exit(-1);
-	}*/
+	}
 	
 }
 
@@ -155,18 +168,102 @@ void select_command(int sock,char *buffer){
 
 }
 
-void read_input(int socket){
+void read_input(int sock){
 
 	char *buffer = 0;
 	fflush(stdout);
 	scanf("%ms",&buffer);
-	select_command(socket,buffer);
+	select_command(sock,buffer);
 }
+
+void startGame(int socket,char *ip,int port,int socket_udp){
+
+	//creo indirizzo per UDP
+	struct sockaddr_in sv_addr;
+	int res;
+
+	memset(&sv_addr,0,sizeof(sv_addr));
+	sv_addr.sin_family = AF_INET;
+	sv_addr.sin_port = htons(port);
+	inet_pton(AF_INET,ip,&sv_addr.sin_addr);
+
+	
+	
+	res = sendUDPInt(socket_udp,sv_addr,555);
+
+
+
+}
+
+void handle_connection_request(int sock){
+	
+	#warning gestire_disconnessione
+	char *ip;
+	char *str = recvString(sock);
+	char answ = 'x';
+	int port;
+
+	do{
+		printf("%s si vuole connettere a te, Accetti? (y/n)",str);
+		fflush(stdout);
+		getchar();				//flush per ritorno a capo
+		scanf("%c",&answ);
+		
+	} while(answ != 'y' && answ != 'n');
+
+
+	if(!sendInt(sock,CONNECT_ANSWER))		return;			//gestire l'errore
+
+	if(answ == 'y'){
+		if(!sendInt(sock,CONNECT_ACPT))	return;				//gestire l'errore
+	} else {
+		if(!sendInt(sock,CONNECT_RFSD))	return;
+	}
+}
+
+void handle_connection_accepted(int socket){
+
+	printf("wewe si gioca\n");
+
+
+}
+
+void handle_receive_data(int socket){
+	char *ip;
+	int port;
+
+	ip = recvString(socket);						//mi aspetto l'ip
+	if(ip == NULL)				return;
+	if(!recvInt(socket,&port))		return;				//porta altro client
+	printf("%s:%d\n",ip,port);
+	startGame(socket,ip,port,socket_udp);
+
+}
+
 
 void select_command_server(int socket,int cmd){
 
-	char *str = recvString(socket);
-	printf("%s si vuole connettere a te\n",str);
+	switch(cmd){
+		case CONNECT_REQ:
+			handle_connection_request(socket);
+			break;
+		case CONNECT_ACPT:
+			handle_connection_accepted(socket);
+			break;
+		case CONNECT_REFUSED:
+			printf("L'utente ha rifiutato la tua partita\n");
+			return;
+			break;
+		case CONNECT_NOUSER:
+			printf("Utente non esistente\n");
+			break;
+		case CONNECT_BUSY:
+			printf("L'utente e' impegnato in un'altra partita\n");
+			break;
+		case CONNECT_DATA:
+			handle_receive_data(socket);
+			break;
+	}
 
 }
 
@@ -177,7 +274,7 @@ int main(int argc,char **argv){
 		exit(-1);
 	}
 
-	int socket_server,status,portServer,socket_client,portClient,cmd;
+	int socket_server,status,portServer,port_udp,cmd;
 	struct sockaddr_in serverAddress;
 
 	int i,fdmax;
@@ -195,7 +292,7 @@ int main(int argc,char **argv){
 	
 	serverAddress.sin_family = AF_INET;
 	serverAddress.sin_port = htons(portServer);
-	inet_pton(AF_INET,argv[2],&serverAddress.sin_addr);
+	inet_pton(AF_INET,argv[1],&serverAddress.sin_addr);
 	
 
 	status = connect(socket_server, (struct sockaddr*)&serverAddress,sizeof(serverAddress));
@@ -204,11 +301,11 @@ int main(int argc,char **argv){
 		return -1;
 	}
 	
-	printf("\nConnessione al server %s (port %d) effettuata con successo\n",argv[2],portServer);
+	printf("\nConnessione al server %s (port %d) effettuata con successo\n",argv[1],portServer);
 
 	
 	cmd_help();
-	cmd_login(socket_server,&socket_client,&portClient);
+	cmd_login(socket_server,&socket_udp,&port_udp);
 
 	FD_ZERO(&master);	
 	FD_ZERO(&read_fds);
@@ -221,6 +318,7 @@ int main(int argc,char **argv){
 	while(true){
 		printf("\r>");
 		fflush(stdout);
+		
 		read_fds = master;
 		if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){
 			perror("[Errore] Select");
@@ -229,10 +327,10 @@ int main(int argc,char **argv){
 
 		for(i = 0; i <= fdmax; i++){
 			if(FD_ISSET(i,&read_fds)){
-				if(i == 0){	//stdin
+				if(i == 0){			//stdin
 					read_input(socket_server);					
-					continue;
-				} else {	//socket
+					//continue;
+				} else {			//socket
 					if(!recvInt(i,&cmd))	return -1;
 					select_command_server(i,cmd);	
 				}
