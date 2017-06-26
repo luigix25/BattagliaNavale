@@ -171,8 +171,8 @@ void connect_function(int sock){
 
 	char *username;
 	user *me,*him;
-	int status;
 
+	//int status;
 	username = recvString(sock);
 	if(username == NULL)				return;	
 
@@ -200,52 +200,76 @@ void connect_function(int sock){
 	}
 
 	him->pending_request = me;
+	me->pending_request = him;
 
 	printf("%s vuole connettersi a %s\n",me->username,him->username);
 
 	if(!sendInt(him->sock,CONNECT_REQ))		return;
 	if(!sendString(him->sock,me->username))		return;
 
-
-
-
-	//butto la pietra, aspetto rispost
-
 }
 
 
-void connect_answer(int sock){
+void connect_acpt(int sock){
 
 	user *me,*him;
-	int status;
+	//int status;
 
 	me = searchUserBySocket(sock);
 
 	him = me->pending_request;
-
-	if(!recvInt(him->sock,&status))			return;
 	
-	if(status == CONNECT_ACPT){
-		him->status = me->status = BUSY;		
-		
-		if(!sendInt(sock,CONNECT_ACPT))		return;		//avviso che ha accettato la partita
-		if(!sendString(sock,him->ip))		return;		//mando a lui l'ip
-		if(!sendInt(sock,him->port))		return;		//mando la porta		
+	printf("%s e %s stanno giocando\n",me->username,him->username);
 
+	him->status = me->status = BUSY;		
+	
+	if(!sendInt(sock,CONNECT_DATA))		return;		//mando la porta		
+	if(!sendString(sock,him->ip))		return;		//mando a lui l'ip
+	if(!sendInt(sock,him->port))		return;		//mando la porta		
 
-		if(!sendString(him->sock,me->ip))	return;		
-		if(!sendInt(him->sock,me->port))	return;
+	if(!sendInt(him->sock,CONNECT_ACPT))	return;		//avviso che ha accettato la partita
+	if(!sendString(him->sock,me->ip))	return;		
+	if(!sendInt(him->sock,me->port))	return;
 
-	} else if(status == CONNECT_RFSD){
-		him->status = me->status = FREE;		
-		if(!sendInt(sock,CONNECT_REFUSED))	return;
+	//me->pending_request = NULL; ??
 
-	}
+}
+
+void connect_rfsd(int sock){
+
+	user *me,*him;
+	//int status;
+
+	me = searchUserBySocket(sock);
+	him = me->pending_request;
+
+	him->status = me->status = FREE;		
+	if(!sendInt(him->sock,CONNECT_REFUSED))	return;
+
+	me->pending_request = NULL;
+	him->pending_request = NULL;
+
+}
+
+void disconnect_function(int sock){
+
+	user *me,*him;
+	me = searchUserBySocket(sock);
+	him = me->pending_request;
+
+	me->status = him->status = FREE;
+	if(!sendInt(him->sock,WON_RETIRED))	return;
+	
+	printf("%s ha vinto la partita contro %s\n",him->username,me->username);
+	printf("%s e' libero\n",him->username);
+	printf("%s e' libero\n",me->username);
 
 
 	me->pending_request = NULL;
+	him->pending_request = NULL;
 
 }
+
 
 void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 
@@ -262,8 +286,14 @@ void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 		case CONNECT_COMMAND:
 			connect_function(sock);
 			break;	
-		case CONNECT_ANSWER:
-			connect_answer(sock);
+		case CONNECT_ACPT:
+			connect_acpt(sock);
+			break;
+		case CONNECT_RFSD:
+			connect_rfsd(sock);
+			break;
+		case DISCONNECT_COMMAND:
+			disconnect_function(sock);
 			break;
 		}
 

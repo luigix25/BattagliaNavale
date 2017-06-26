@@ -1,13 +1,14 @@
 #include "library.h"
 
 const char *commands_list[4] = {"!help","!who","!connect","!quit"};
+const char *commands_list_game[4] = {"!help","!disconnect","!shot","!show"};
 
-int sendUDPInt(int sd,struct sockaddr_in sv_addr,int value){
+int sendUDPInt(int sd,struct sockaddr_in *sv_addr,int value){
 	uint32_t tosend;
 	int ret;
 	tosend = htonl(value);
 
-	ret = sendto(sd,&tosend,sizeof(uint32_t),0,(struct sockaddr*)&sv_addr,sizeof(sv_addr));
+	ret = sendto(sd,&tosend,sizeof(uint32_t),0,(struct sockaddr*)sv_addr,sizeof(*sv_addr));
 	if(ret <= 0){
 		perror("[Errore sendUDPInt]");
 		return ret;
@@ -23,7 +24,7 @@ int recvUDPInt(int sd,struct sockaddr_in *cl_addr,int *value){
 
 	addrlen = sizeof(cl_addr);
 
-	ret = recvfrom(sd,&torecv,sizeof(uint32_t),0,(struct sockaddr*)&cl_addr,&addrlen);
+	ret = recvfrom(sd,&torecv,sizeof(uint32_t),0,(struct sockaddr*)cl_addr,&addrlen);
 	if(ret <= 0){
 		perror("[Errore recvUDPInt]");
 		return ret;

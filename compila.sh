@@ -1,6 +1,7 @@
 #!/bin/bash
 
 rm server client
+rm *.o
 
 gcc -c client.c -o client.o -Wall
 gcc -c server.c -o server.o -Wall

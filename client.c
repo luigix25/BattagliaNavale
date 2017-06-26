@@ -1,7 +1,34 @@
 #include "library/library.h"
 
+#DEFINE N_NAVI 1
+
+
 fd_set master;
 int socket_udp;
+
+void handle_connection_request(int);
+void handle_connection_accepted(int);
+void handle_receive_data(int);
+void cmd_show();
+
+short in_game;
+char grid[6][6];			// - vuota; 0 nave integra; X nave colpita; T tentativi utente; ? incognita
+char grid_opponent[6][6];
+
+struct sockaddr_in setup_sockaddr(char *ip,int port){
+
+//	struct sockaddr_in *sv_addr = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in));
+	struct sockaddr_in sv_addr;// = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in));
+
+	memset(&sv_addr,0,sizeof(sv_addr));
+
+	sv_addr.sin_family = AF_INET;
+	sv_addr.sin_port = htons(port);
+	inet_pton(AF_INET,ip,&sv_addr.sin_addr);
+	return sv_addr;
+
+}
+
 
 void cmd_help(){
 
@@ -19,47 +46,130 @@ void cmd_help(){
 
 }
 
+int check_position(char *position){
+
+	if(strlen(position)>2)
+		return false;
+
+	char a = position[0];
+	char b = position[1];
+
+	if(!(b >='0' && b<='5'))
+		return false;
+
+	int n = b-'0';
+
+	if((a >= 'a' && a <='z') && (n>=0 && n<=5))			//credo sia ridondante 
+		return true;
+	else 
+		return false;
+
+
+}
+
+int place_ship(char *position){
+
+	
+
+	int row = position[0] - 'a';
+	int col = position[1] - '0';
+	
+	if(grid[row][col] != '-')
+		return false;
+	
+	grid[row][col] = '0';
+	return true;
+
+
+}
+
+void setup_grid(){
+
+	int i,j,to_place;
+	to_place = N_NAVI;				//sarebbe 7-1
+	to_place--;
+	char *position;
+
+	for(i=0;i<6;i++)
+		for(j=0;j<6;j++){
+			grid[i][j] = '-';
+			grid_opponent[i][j] = '?';
+		}
+
+	while(to_place >=0){
+		printf("Dove vuoi posizionare la nave?\n");
+		scanf("%ms",&position);
+
+		if(!check_position(position)){
+			printf("Posizione non valida; Formato a-z0-6 es: a0\n");
+		} else {
+			if(!place_ship(position)){
+				printf("Posizione gia' occupata\n");
+			} else {
+				to_place--;
+				if(to_place <0)
+					continue;
+				printf("Nave aggiunta correttamente, ne rimangono %d\n",to_place+1);
+			}
+
+		}
+
+	}
+
+
+}
+
+
+void cmd_help_game(){
+
+	char *desc[4] = {"--> mostra l'elenco dei comandi disponibili",
+			"--> disconnette il client dall'attuale partita",
+			"square --> fai un tentativo con la casella square",
+			"--> visualizza la griglia di gioco\n"};
+
+	int i;
+	printf("\n");	
+	printf("Sono disponibili i seguenti comandi:\n");
+	for(i=0;i<4;i++){
+		printf("%s %s\n",commands_list_game[i],desc[i]);
+	}
+
+}
+
 void cmd_connect(int sock){
 
 	char *username;
-	char *ip;
-	int port;
+	//int port;
 
 	int result;
 	scanf("%ms",&username);
 	if(!sendInt(sock,CONNECT_COMMAND))	return;
 	if(!sendString(sock,username))		return;
-	/*if(!recvInt(sock,&result))		return;
+	if(!recvInt(sock,&result))		return;
 
 	switch(result){
-		case CONNECT_NOUSER:
-			printf("Username non esistente\n");
+		case CONNECT_REQ:
+			handle_connection_request(sock);
 			break;
-		case CONNECT_BUSY:
-			printf("L'utente occupato\n");
+		case CONNECT_ACPT:
+			handle_connection_accepted(sock);
 			break;
 		case CONNECT_REFUSED:
-			printf("L'utente ha rifiutato la partita\n");
+			printf("L'utente ha rifiutato la tua partita\n");
+			return;
 			break;
-		case CONNECT_OK:
-			printf("L'utente ha accettato la partita\n");
-			
-			ip = recvString(sock);	
-			if(ip==NULL)				return;			//ip
-
-			if(!recvInt(sock,&port));		return;			//porta
-
-			printf(">%s:%d\n",ip,port);
-			printf("provo a ricevere UDP\n");
-
-			struct sockaddr_in cl;
-			int ricevuto;
-			//recvUDPInt(socket_udp,&cl,&ricevuto);
-			//printf("ricevuto %d\n",ricevuto);	
-
+		case CONNECT_NOUSER:
+			printf("Utente non esistente\n");
+			break;
+		case CONNECT_BUSY:
+			printf("L'utente e' impegnato in un'altra partita\n");
+			break;
+		case CONNECT_DATA:
+			handle_receive_data(sock);
 			break;
 	}
-*/
+
+
 }
 
 void cmd_login(int sock,int *sock_client,int *port_client){
@@ -150,6 +260,14 @@ void cmd_quit(int sock){
 	exit(1);
 }
 
+void cmd_disconnect(int sock){
+	printf("Disconnessione avvenuta con successo: TI SEI ARRESO\n");
+	in_game = false;
+
+	if(!sendInt(sock,DISCONNECT_COMMAND))		return;
+
+}
+
 void select_command(int sock,char *buffer){
 
 	if(strcmp("!help",buffer) == 0){
@@ -164,44 +282,71 @@ void select_command(int sock,char *buffer){
 	} else if(strcmp("!connect",buffer) == 0){
 		cmd_connect(sock);
 		return;	
-	}
+	} /*else {
+		printf("Comando non riconosciuto\n");
+	}*/
 
 }
+
+void select_command_game(int sock,char *buffer){
+
+	if(strcmp("!help",buffer) == 0){
+		cmd_help_game();
+		return;
+	} else if(strcmp("!disconnect",buffer) == 0){
+		cmd_disconnect(sock);
+		return;
+	} else if(strcmp("!shot",buffer) == 0){
+		//cmd_quit(sock);
+		return;	
+	} else if(strcmp("!show",buffer) == 0){
+		cmd_show();
+		return;	
+	} /*else {
+		printf("Comando non riconosciuto\n");
+	}*/
+
+}
+
 
 void read_input(int sock){
 
 	char *buffer = 0;
 	fflush(stdout);
 	scanf("%ms",&buffer);
-	select_command(sock,buffer);
+
+	if(!in_game)
+		select_command(sock,buffer);
+	else
+		select_command_game(sock,buffer);
 }
 
-void startGame(int socket,char *ip,int port,int socket_udp){
+void startGame(int sock,char *ip,int port,int socket_udp,int i_start){
 
 	//creo indirizzo per UDP
 	struct sockaddr_in sv_addr;
-	int res;
+	int response;
 
-	memset(&sv_addr,0,sizeof(sv_addr));
-	sv_addr.sin_family = AF_INET;
-	sv_addr.sin_port = htons(port);
-	inet_pton(AF_INET,ip,&sv_addr.sin_addr);
+	sv_addr = setup_sockaddr(ip,port);
+	setup_grid();
+
+
+	if(i_start == true){
+		printf("E' il tuo turno!\n");
+	} else {
+		printf("In attesa dell'avversario\n");
+		recvUDPInt(socket_udp,&sv_addr,&reponse);
+	}
 
 	
-	
-	res = sendUDPInt(socket_udp,sv_addr,555);
-
-
-
+	//int res = sendUDPInt(socket_udp,&sv_addr,555);
 }
 
 void handle_connection_request(int sock){
 	
 	#warning gestire_disconnessione
-	char *ip;
 	char *str = recvString(sock);
 	char answ = 'x';
-	int port;
 
 	do{
 		printf("%s si vuole connettere a te, Accetti? (y/n)",str);
@@ -212,34 +357,80 @@ void handle_connection_request(int sock){
 	} while(answ != 'y' && answ != 'n');
 
 
-	if(!sendInt(sock,CONNECT_ANSWER))		return;			//gestire l'errore
-
 	if(answ == 'y'){
-		if(!sendInt(sock,CONNECT_ACPT))	return;				//gestire l'errore
+		in_game = true;
+		if(!sendInt(sock,CONNECT_ACPT))	return;				//gestire l'errore SISTEMARE
 	} else {
 		if(!sendInt(sock,CONNECT_RFSD))	return;
 	}
 }
 
-void handle_connection_accepted(int socket){
+void handle_connection_accepted(int sock){
 
-	printf("wewe si gioca\n");
+	printf("L'utente ha accettato la partita\n");
 
-
-}
-
-void handle_receive_data(int socket){
+	in_game = true;
 	char *ip;
 	int port;
 
-	ip = recvString(socket);						//mi aspetto l'ip
+	ip = recvString(sock);						//mi aspetto l'ip
 	if(ip == NULL)				return;
-	if(!recvInt(socket,&port))		return;				//porta altro client
-	printf("%s:%d\n",ip,port);
-	startGame(socket,ip,port,socket_udp);
+	if(!recvInt(sock,&port))		return;				//porta altro client
+	
+	printf("%s:%d\n",ip,port);						//ELIMINARE
+	
+	//int res = sendUDPInt(socket_udp,sv_addr,555);
+
+	startGame(sock,ip,port,socket_udp,true);
+
 
 }
 
+void handle_receive_data(int sock){
+	char *ip;
+	int port;
+
+	ip = recvString(sock);						//mi aspetto l'ip
+	if(ip == NULL)				return;
+	if(!recvInt(sock,&port))		return;				//porta altro client
+	printf("%s:%d\n",ip,port);
+			
+			//ELIMINARE
+
+	//struct sockaddr_in r = setup_sockaddr(ip,port);
+
+
+	startGame(sock,ip,port,socket_udp,false);
+
+}
+
+
+void cmd_show(){
+	int i,j;
+
+	printf("- vuota; 0 nave integra; X nave colpita; T tentativi avversario; ? incognita\n \n");
+
+	printf("La tua griglia:\n\n");
+
+	for(i=0;i<6;i++){
+		for(j=0;j<6;j++){
+			printf("%c",grid[i][j]);
+		}
+		printf("\n");
+	}
+
+
+	printf("La griglia del tuo avversario:\n\n");
+
+	for(i=0;i<6;i++){
+		for(j=0;j<6;j++){
+			printf("%c",grid_opponent[i][j]);
+		}
+		printf("\n");
+	}
+
+
+}
 
 void select_command_server(int socket,int cmd){
 
@@ -263,6 +454,11 @@ void select_command_server(int socket,int cmd){
 		case CONNECT_DATA:
 			handle_receive_data(socket);
 			break;
+		case WON_RETIRED:
+			printf("Complimenti hai vinto! Il tuo avversario si e' ritirato\n");
+			in_game = false;
+			break;
+
 	}
 
 }
@@ -307,20 +503,28 @@ int main(int argc,char **argv){
 	cmd_help();
 	cmd_login(socket_server,&socket_udp,&port_udp);
 
+	in_game = false;
+
 	FD_ZERO(&master);	
 	FD_ZERO(&read_fds);
 
+	FD_SET(socket_udp,&master);
 	FD_SET(socket_server,&master);
 	FD_SET(0,&master);		// 0 è stdin
 
-	fdmax = socket_server;
+	fdmax = (socket_server > socket_udp)?socket_server:socket_udp;
 
 	while(true){
-		printf("\r>");
+
+		if(!in_game)
+			printf("\r>");
+		else
+			printf("#");
+
 		fflush(stdout);
 		
 		read_fds = master;
-		if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){
+		if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){				//SISTEMARE TIMEOUT
 			perror("[Errore] Select");
 			exit(-1);
 		}
@@ -330,9 +534,14 @@ int main(int argc,char **argv){
 				if(i == 0){			//stdin
 					read_input(socket_server);					
 					//continue;
-				} else {			//socket
+				} else if(i == socket_server) {			//server tcp
 					if(!recvInt(i,&cmd))	return -1;
 					select_command_server(i,cmd);	
+				} else if(i == socket_udp){			//server udp
+					if(!recvInt(i,&cmd))	return -1;
+					printf("ricevuto udp %d\n",cmd);
+					//select_command_server(i,cmd);	
+
 				}
 
 			}
