@@ -669,12 +669,11 @@ int main(int argc,char **argv){
 		if(waiting){
 			if(select(fdmax+1,&read_fds,NULL,NULL,&timeout) <=0){				//SISTEMARE TIMEOUT
 
-			if(waiting){
 				printf("Timeout dell'avversario, hai vinto!\n");
-			}
 
-                	timeout.tv_sec = 10;
-			continue;
+                		timeout.tv_sec = 10;
+				continue;
+			}
 		} else {
 			if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){
 				perror("Errore select");
@@ -694,7 +693,7 @@ int main(int argc,char **argv){
 					if(!recvInt(i,&cmd))	return -1;
 					select_command_server(i,cmd);	
 				} else if(i == socket_udp){			//server udp
-					if(!recvInt(i,&cmd))	return -1;
+					if(!recvUDPInt(i,&opponent,&cmd))	return -1;
 					select_command_udp(i,cmd,socket_server);	
 
 				}
