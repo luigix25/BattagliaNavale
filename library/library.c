@@ -70,6 +70,47 @@ int sendString(int sd,char *buffer){
 
 }
 
+int sendUDPString(int sd,char *buffer,struct sockaddr_in *sv_addr){
+	int len,ret;//,addrlen;
+
+	//addrlen = sizeof(cl_addr);
+
+	len = strlen(buffer)+1;
+
+	if(!sendUDPInt(sd,sv_addr,len))
+		return false;
+	
+	//ret = send(sd,buffer,len,0);
+	ret = sendto(sd,buffer,len,0,(struct sockaddr*)sv_addr,sizeof(*sv_addr));
+	if(ret < len){
+		perror("[Errore] UDP send");
+	} 
+	
+	return (len == ret);
+
+}
+
+
+
+char* recvUDPString(int sd,struct sockaddr_in *cl_addr){
+	int ret,len,addrlen;
+    	addrlen = sizeof(*cl_addr);
+
+	if(!recvUDPInt(sd,cl_addr,&len)){
+		perror("[Errore] UDP recv");
+		return NULL;
+	}
+	char *buffer = (char *)malloc(len);
+
+	ret = recvfrom(sd,buffer,len,0,(struct sockaddr *)cl_addr,&addrlen);
+	if(ret < len){
+		perror("[Errore] recv");
+		return NULL;	
+	}
+	return buffer;
+}
+
+
 char* recvString(int sd){
 	int ret,len;
 

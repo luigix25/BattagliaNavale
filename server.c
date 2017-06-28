@@ -251,6 +251,25 @@ void connect_rfsd(int sock){
 
 }
 
+void end_game(int sock){
+
+	user *me,*him;
+	me = searchUserBySocket(sock);
+	him = me->pending_request;
+
+	me->status = him->status = FREE;
+	
+	printf("%s ha vinto la partita contro %s\n",him->username,me->username);
+	printf("%s e' libero\n",him->username);
+	printf("%s e' libero\n",me->username);
+
+
+	me->pending_request = NULL;
+	him->pending_request = NULL;
+
+}
+
+
 void disconnect_function(int sock){
 
 	user *me,*him;
@@ -269,6 +288,8 @@ void disconnect_function(int sock){
 	him->pending_request = NULL;
 
 }
+
+
 
 
 void select_command(int cmd,int sock,struct sockaddr_in socket_full){
@@ -294,6 +315,9 @@ void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 			break;
 		case DISCONNECT_COMMAND:
 			disconnect_function(sock);
+			break;
+		case END_GAME:
+			end_game(sock);
 			break;
 		}
 

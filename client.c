@@ -1,24 +1,29 @@
 #include "library/library.h"
 
-#DEFINE N_NAVI 1
+#define N_NAVI 2
 
 
 fd_set master;
 int socket_udp;
+struct sockaddr_in opponent;
 
 void handle_connection_request(int);
 void handle_connection_accepted(int);
 void handle_receive_data(int);
 void cmd_show();
+void wait_for_opponent(short);
+
 
 short in_game;
+short waiting;
+short ships_left;
 char grid[6][6];			// - vuota; 0 nave integra; X nave colpita; T tentativi utente; ? incognita
 char grid_opponent[6][6];
+char *last_shot;
 
 struct sockaddr_in setup_sockaddr(char *ip,int port){
 
-//	struct sockaddr_in *sv_addr = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in));
-	struct sockaddr_in sv_addr;// = (struct sockaddr_in *)malloc(sizeof(struct sockaddr_in));
+	struct sockaddr_in sv_addr;
 
 	memset(&sv_addr,0,sizeof(sv_addr));
 
@@ -59,7 +64,7 @@ int check_position(char *position){
 
 	int n = b-'0';
 
-	if((a >= 'a' && a <='z') && (n>=0 && n<=5))			//credo sia ridondante 
+	if((a >= 'a' && a <='f') && (n>=0 && n<=5))			//credo sia ridondante 
 		return true;
 	else 
 		return false;
@@ -84,6 +89,8 @@ int place_ship(char *position){
 }
 
 void setup_grid(){
+	
+	ships_left = N_NAVI;
 
 	int i,j,to_place;
 	to_place = N_NAVI;				//sarebbe 7-1
@@ -268,23 +275,53 @@ void cmd_disconnect(int sock){
 
 }
 
+
+void cmd_shot(int sock){
+
+	char *position;
+	int row,col;
+
+	scanf("%ms",&position);
+	
+	if(check_position(position) == false){
+		printf("Posizione non valida!\n");
+		return;	
+	} 
+
+	row = position[0] - 'a';
+	col = position[1] - '0';
+	
+	if(grid_opponent[row][col] != '?'){
+		printf("Hai gia' sparato qui!\n");
+		return;
+	} 
+
+	last_shot = position;		
+
+	
+	sendUDPInt(socket_udp,&opponent,SHOT_DATA);
+	sendUDPString(socket_udp,position,&opponent);
+	wait_for_opponent(true);
+
+
+}
+
+
 void select_command(int sock,char *buffer){
 
 	if(strcmp("!help",buffer) == 0){
 		cmd_help();
-		return;
 	} else if(strcmp("!who",buffer) == 0){
 		cmd_who(sock);
-		return;
 	} else if(strcmp("!quit",buffer) == 0){
 		cmd_quit(sock);
-		return;	
 	} else if(strcmp("!connect",buffer) == 0){
 		cmd_connect(sock);
-		return;	
 	} /*else {
 		printf("Comando non riconosciuto\n");
 	}*/
+
+	free(buffer);
 
 }
 
@@ -292,19 +329,17 @@ void select_command_game(int sock,char *buffer){
 
 	if(strcmp("!help",buffer) == 0){
 		cmd_help_game();
-		return;
 	} else if(strcmp("!disconnect",buffer) == 0){
 		cmd_disconnect(sock);
-		return;
 	} else if(strcmp("!shot",buffer) == 0){
-		//cmd_quit(sock);
-		return;	
+		cmd_shot(sock);
 	} else if(strcmp("!show",buffer) == 0){
 		cmd_show();
-		return;	
 	} /*else {
 		printf("Comando non riconosciuto\n");
 	}*/
+
+	free(buffer);
 
 }
 
@@ -321,13 +356,22 @@ void read_input(int sock){
 		select_command_game(sock,buffer);
 }
 
+void wait_for_opponent(short cmd){
+
+	waiting = cmd;
+	if(cmd){
+		FD_CLR(0,&master);
+	} else {
+		FD_SET(0,&master);
+	}
+}
+
 void startGame(int sock,char *ip,int port,int socket_udp,int i_start){
 
 	//creo indirizzo per UDP
-	struct sockaddr_in sv_addr;
-	int response;
+	//struct sockaddr_in sv_addr;
 
-	sv_addr = setup_sockaddr(ip,port);
+	opponent = setup_sockaddr(ip,port);
 	setup_grid();
 
 
@@ -335,11 +379,9 @@ void startGame(int sock,char *ip,int port,int socket_udp,int i_start){
 		printf("E' il tuo turno!\n");
 	} else {
 		printf("In attesa dell'avversario\n");
-		recvUDPInt(socket_udp,&sv_addr,&reponse);
+		wait_for_opponent(true);
 	}
 
-	
-	//int res = sendUDPInt(socket_udp,&sv_addr,555);
 }
 
 void handle_connection_request(int sock){
@@ -393,9 +435,8 @@ void handle_receive_data(int sock){
 	ip = recvString(sock);						//mi aspetto l'ip
 	if(ip == NULL)				return;
 	if(!recvInt(sock,&port))		return;				//porta altro client
-	printf("%s:%d\n",ip,port);
+	printf("%s:%d\n",ip,port);					//ELIMINARE
 			
-			//ELIMINARE
 
 	//struct sockaddr_in r = setup_sockaddr(ip,port);
 
@@ -431,6 +472,98 @@ void cmd_show(){
 
 
 }
+
+void handle_data_shot(int socket_tcp){
+
+	char *recvd;
+	recvd = recvUDPString(socket_udp,&opponent);
+	printf("L'avversario ha sparato in %s\n",recvd);
+
+
+	int row = recvd[0] - 'a';
+	int col = recvd[1] - '0';
+	char c;
+	int tosend;
+
+	if(grid[row][col] == '-'){ // 0 è vuoto
+			c = 'T';
+			tosend = WATER;
+			printf("L'avversario ha colpito l'acqua\n");
+	} else {
+		c = 'X';
+		tosend = HIT;
+		printf("L'avversario ti ha colpito una nave\n");
+		ships_left--;
+	}
+
+
+	if(ships_left == 0){
+		printf("Hai perso, era la tua ultima nave!\n");
+		sendUDPInt(socket_udp,&opponent,YOU_WON);				//SISTEMARE
+		sendInt(socket_tcp,END_GAME);						//SISTEMARE
+		
+		in_game = false;
+		wait_for_opponent(false);
+		return;
+	}
+
+
+	grid[row][col] = c;
+
+	sendUDPInt(socket_udp,&opponent,RESPONSE_SHOT);
+	sendUDPInt(socket_udp,&opponent,tosend);
+
+
+	wait_for_opponent(false);
+	printf("E' il tuo turno\n");
+
+}
+
+void handle_response_shot(){
+
+	int resp,row,col;
+	char c;
+	recvUDPInt(socket_udp,&opponent,&resp);
+
+	if(resp == WATER){
+		c = '-';
+		printf("Hai colpito l'acqua\n");
+	} else if(resp == HIT){
+		c = 'X';
+		printf("Hai colpito una nave\n");
+	}
+
+	row = last_shot[0] - 'a';
+	col = last_shot[1] - '0';
+
+	grid_opponent[row][col] = c;
+
+}
+
+void handle_win(){
+
+	printf("Congratulazioni hai vinto!\n");
+	in_game = false;
+	wait_for_opponent(false);
+
+}
+
+void select_command_udp(int sock,int cmd,int socket_tcp){
+
+	switch(cmd){
+		case SHOT_DATA:
+			handle_data_shot(socket_tcp);
+			break;
+		case RESPONSE_SHOT:
+			handle_response_shot();
+			break;
+		case YOU_WON:
+			handle_win();
+			break;
+	}
+
+}
+
 
 void select_command_server(int socket,int cmd){
 
@@ -504,6 +637,7 @@ int main(int argc,char **argv){
 	cmd_login(socket_server,&socket_udp,&port_udp);
 
 	in_game = false;
+	waiting = false;
 
 	FD_ZERO(&master);	
 	FD_ZERO(&read_fds);
@@ -514,20 +648,42 @@ int main(int argc,char **argv){
 
 	fdmax = (socket_server > socket_udp)?socket_server:socket_udp;
 
+	struct timeval timeout = {10,0}; 
+
+
 	while(true){
 
-		if(!in_game)
+		if(!in_game){
 			printf("\r>");
-		else
-			printf("#");
+			fflush(stdout);
+		}else {
+			if(!waiting){				//non molto elegante
+				printf("#");
+				fflush(stdout);
+			}		
+		}
 
-		fflush(stdout);
 		
 		read_fds = master;
-		if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){				//SISTEMARE TIMEOUT
-			perror("[Errore] Select");
-			exit(-1);
+
+		if(waiting){
+			if(select(fdmax+1,&read_fds,NULL,NULL,&timeout) <=0){				//SISTEMARE TIMEOUT
+
+			if(waiting){
+				printf("Timeout dell'avversario, hai vinto!\n");
+			}
+
+                	timeout.tv_sec = 10;
+			continue;
+		} else {
+			if(select(fdmax+1,&read_fds,NULL,NULL,NULL) <=0){
+				perror("Errore select");
+				exit(-1);
+			}
+
 		}
+
+
 
 		for(i = 0; i <= fdmax; i++){
 			if(FD_ISSET(i,&read_fds)){
@@ -539,8 +695,7 @@ int main(int argc,char **argv){
 					select_command_server(i,cmd);	
 				} else if(i == socket_udp){			//server udp
 					if(!recvInt(i,&cmd))	return -1;
-					printf("ricevuto udp %d\n",cmd);
-					//select_command_server(i,cmd);	
+					select_command_udp(i,cmd,socket_server);	
 
 				}
 
