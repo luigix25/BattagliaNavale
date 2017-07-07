@@ -299,8 +299,9 @@ void cmd_shot(int sock){
 	last_shot = position;		
 
 	
-	sendUDPInt(socket_udp,&opponent,SHOT_DATA);
-	sendUDPString(socket_udp,position,&opponent);
+	if(!sendUDPInt(socket_udp,&opponent,SHOT_DATA))		protocol_error(sock);
+	if(!sendUDPString(socket_udp,position,&opponent))	protocol_error(sock);
+	
 	wait_for_opponent(true);
 
 
@@ -473,10 +474,22 @@ void cmd_show(){
 
 }
 
+void protocol_error(int sock_tcp){
+
+	printf("Errore del gioco. Termino\n");
+	close(sock_tcp);
+	exit(-1);
+
+}
+
 void handle_data_shot(int socket_tcp){
 
 	char *recvd;
 	recvd = recvUDPString(socket_udp,&opponent);
+	if(recv == NULL)
+		protocol_error(socket_tcp);
+
+
 	printf("L'avversario ha sparato in %s\n",recvd);
 
 
@@ -499,9 +512,9 @@ void handle_data_shot(int socket_tcp){
 
 	if(ships_left == 0){
 		printf("Hai perso, era la tua ultima nave!\n");
-		sendUDPInt(socket_udp,&opponent,YOU_WON);				//SISTEMARE
-		sendInt(socket_tcp,END_GAME);						//SISTEMARE
-		
+		if(!sendUDPInt(socket_udp,&opponent,YOU_WON))		protocol_error(socket_tcp);
+		if(!sendInt(socket_tcp,END_GAME))			return -1;						//SISTEMARE ?
+	
 		in_game = false;
 		wait_for_opponent(false);
 		return;
@@ -510,8 +523,8 @@ void handle_data_shot(int socket_tcp){
 
 	grid[row][col] = c;
 
-	sendUDPInt(socket_udp,&opponent,RESPONSE_SHOT);
-	sendUDPInt(socket_udp,&opponent,tosend);
+	if(!sendUDPInt(socket_udp,&opponent,RESPONSE_SHOT))	protocol_error(socket_tcp);
+	if(!sendUDPInt(socket_udp,&opponent,tosend))		protocol_error(socket_tcp);
 
 
 	wait_for_opponent(false);
@@ -523,7 +536,9 @@ void handle_response_shot(){
 
 	int resp,row,col;
 	char c;
-	recvUDPInt(socket_udp,&opponent,&resp);
+	if(!recvUDPInt(socket_udp,&opponent,&resp)){
+		procotol_error(socket_tcp);
+	}
 
 	if(resp == WATER){
 		c = '-';
@@ -709,7 +724,9 @@ int main(int argc,char **argv){
 					if(!recvInt(i,&cmd))			return -1;
 					select_command_server(i,cmd);	
 				} else if(i == socket_udp){			//server udp
-					if(!recvUDPInt(i,&opponent,&cmd))	return -1;
+					if(!recvUDPInt(i,&opponent,&cmd)){
+						protocol_error(socket_server);
+					}
 					select_command_udp(i,cmd,socket_server);	
 
 				}
