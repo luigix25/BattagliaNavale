@@ -591,6 +591,14 @@ void select_command_server(int socket,int cmd){
 			printf("Complimenti hai vinto! Il tuo avversario si e' ritirato\n");
 			in_game = false;
 			break;
+		case OPP_DISCONNECTED_TCP:
+			printf("Il tuo avversario non e' più connesso con il server di gioco, Hai vinto!\n");
+			in_game = false;
+			break;
+		case YOU_TIMEOUT:
+			printf("Timeout, hai perso!\n");
+			in_game = false;
+			break;
 
 	}
 
@@ -656,7 +664,7 @@ int main(int argc,char **argv){
 		if(!in_game){
 			printf("\r>");
 			fflush(stdout);
-		}else {
+		} else {
 			if(!waiting){				//non molto elegante
 				printf("#");
 				fflush(stdout);
@@ -669,7 +677,15 @@ int main(int argc,char **argv){
 		if(waiting){
 			if(select(fdmax+1,&read_fds,NULL,NULL,&timeout) <=0){				//SISTEMARE TIMEOUT
 
+				if(in_game == false){
+					continue;
+				}
+
 				printf("Timeout dell'avversario, hai vinto!\n");
+				if(!sendInt(socket_server,NOTIFY_OPP_TIMEOUT))	return -1;
+				wait_for_opponent(false);
+
+				in_game = false;				
 
                 		timeout.tv_sec = 10;
 				continue;
@@ -690,7 +706,7 @@ int main(int argc,char **argv){
 					read_input(socket_server);					
 					//continue;
 				} else if(i == socket_server) {			//server tcp
-					if(!recvInt(i,&cmd))	return -1;
+					if(!recvInt(i,&cmd))			return -1;
 					select_command_server(i,cmd);	
 				} else if(i == socket_udp){			//server udp
 					if(!recvUDPInt(i,&opponent,&cmd))	return -1;

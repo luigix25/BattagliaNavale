@@ -66,7 +66,7 @@ void addUser(char *username,unsigned int port,int sock,struct sockaddr_in socket
 	new_user->status = FREE;
 	new_user->sock = sock;
 
-	inet_ntop(AF_INET,&socket_full.sin_addr,new_user->ip,INET_ADDRSTRLEN);		//converto l'ip 
+	inet_ntop(AF_INET,&socket_full.sin_addr,new_user->ip,INET_ADDRSTRLEN);		//converto l'ip in stringa
 
 	n_users++;
 
@@ -105,6 +105,17 @@ void removeUser(int sock){
 	}
 
 	n_users--;
+
+	if(tmp->status == BUSY){			//il tizio stava giocando
+		user *him = tmp->pending_request;
+		if(!sendInt(him->sock,OPP_DISCONNECTED_TCP)) 		return;
+		him->status = FREE;
+		printf("%s ha vinto!\n",him->username);			//il nome dell'avversario e' andato perso
+		printf("%s e' libero\n",him->username);
+
+
+	}
+	
 
 	printf("%s si e' disconnesso\n",tmp->username);
 
@@ -289,7 +300,30 @@ void disconnect_function(int sock){
 
 }
 
+void handle_timeout(int sock){
 
+	user *me,*him;
+	me = searchUserBySocket(sock);
+	him = me->pending_request;
+
+	if(him == NULL){	// non credo si possa arrivare qui, il server segnala la disconnessione prima che scatti il TO
+		me->status = FREE;
+		printf("%s e' libero\n",me->username);
+		return;
+	}
+
+	him->status = me->status = FREE;
+
+	me->pending_request = him->pending_request = NULL;
+	if(!sendInt(him->sock,YOU_TIMEOUT))				return;
+	
+
+	printf("%s ha vinto la partita contro %s\n",me->username,him->username);
+	printf("%s e' libero\n",him->username);
+	printf("%s e' libero\n",me->username);
+
+
+}
 
 
 void select_command(int cmd,int sock,struct sockaddr_in socket_full){
@@ -318,6 +352,9 @@ void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 			break;
 		case END_GAME:
 			end_game(sock);
+			break;
+		case NOTIFY_OPP_TIMEOUT:
+			handle_timeout(sock);
 			break;
 		}
 
