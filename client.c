@@ -4,7 +4,7 @@
 
 
 fd_set master;
-int socket_udp;
+int socket_udp,socket_tcp;
 struct sockaddr_in opponent;
 
 void handle_connection_request(int);
@@ -12,6 +12,7 @@ void handle_connection_accepted(int);
 void handle_receive_data(int);
 void cmd_show();
 void wait_for_opponent(short);
+void protocol_error(int);
 
 
 short in_game;
@@ -387,7 +388,6 @@ void startGame(int sock,char *ip,int port,int socket_udp,int i_start){
 
 void handle_connection_request(int sock){
 	
-	#warning gestire_disconnessione
 	char *str = recvString(sock);
 	char answ = 'x';
 
@@ -486,7 +486,7 @@ void handle_data_shot(int socket_tcp){
 
 	char *recvd;
 	recvd = recvUDPString(socket_udp,&opponent);
-	if(recv == NULL)
+	if(recvd == NULL)
 		protocol_error(socket_tcp);
 
 
@@ -513,7 +513,7 @@ void handle_data_shot(int socket_tcp){
 	if(ships_left == 0){
 		printf("Hai perso, era la tua ultima nave!\n");
 		if(!sendUDPInt(socket_udp,&opponent,YOU_WON))		protocol_error(socket_tcp);
-		if(!sendInt(socket_tcp,END_GAME))			return -1;						//SISTEMARE ?
+		if(!sendInt(socket_tcp,END_GAME))			return ;						//SISTEMARE ?
 	
 		in_game = false;
 		wait_for_opponent(false);
@@ -537,7 +537,7 @@ void handle_response_shot(){
 	int resp,row,col;
 	char c;
 	if(!recvUDPInt(socket_udp,&opponent,&resp)){
-		procotol_error(socket_tcp);
+		protocol_error(socket_tcp);
 	}
 
 	if(resp == WATER){
@@ -609,10 +609,12 @@ void select_command_server(int socket,int cmd){
 		case OPP_DISCONNECTED_TCP:
 			printf("Il tuo avversario non e' più connesso con il server di gioco, Hai vinto!\n");
 			in_game = false;
+			wait_for_opponent(false);
 			break;
 		case YOU_TIMEOUT:
 			printf("Timeout, hai perso!\n");
 			in_game = false;
+			wait_for_opponent(false);
 			break;
 
 	}
@@ -626,7 +628,7 @@ int main(int argc,char **argv){
 		exit(-1);
 	}
 
-	int socket_server,status,portServer,port_udp,cmd;
+	int status,portServer,port_udp,cmd;
 	struct sockaddr_in serverAddress;
 
 	int i,fdmax;
@@ -634,8 +636,8 @@ int main(int argc,char **argv){
 
 	portServer = atoi(argv[2]);
 
-	socket_server = socket(AF_INET,SOCK_STREAM,0);
-	if(socket_server < 0){
+	socket_tcp = socket(AF_INET,SOCK_STREAM,0);
+	if(socket_tcp < 0){
 		perror("[Errore] socket\n");
 		return -1;
 	}
@@ -647,7 +649,7 @@ int main(int argc,char **argv){
 	inet_pton(AF_INET,argv[1],&serverAddress.sin_addr);
 	
 
-	status = connect(socket_server, (struct sockaddr*)&serverAddress,sizeof(serverAddress));
+	status = connect(socket_tcp, (struct sockaddr*)&serverAddress,sizeof(serverAddress));
 	if(status < 0){
 		perror("[Errore] connect\n");
 		return -1;
@@ -657,7 +659,7 @@ int main(int argc,char **argv){
 
 	
 	cmd_help();
-	cmd_login(socket_server,&socket_udp,&port_udp);
+	cmd_login(socket_tcp,&socket_udp,&port_udp);
 
 	in_game = false;
 	waiting = false;
@@ -666,10 +668,10 @@ int main(int argc,char **argv){
 	FD_ZERO(&read_fds);
 
 	FD_SET(socket_udp,&master);
-	FD_SET(socket_server,&master);
+	FD_SET(socket_tcp,&master);
 	FD_SET(0,&master);		// 0 è stdin
 
-	fdmax = (socket_server > socket_udp)?socket_server:socket_udp;
+	fdmax = (socket_tcp > socket_udp)?socket_tcp:socket_udp;
 
 	struct timeval timeout = {10,0}; 
 
@@ -697,7 +699,7 @@ int main(int argc,char **argv){
 				}
 
 				printf("Timeout dell'avversario, hai vinto!\n");
-				if(!sendInt(socket_server,NOTIFY_OPP_TIMEOUT))	return -1;
+				if(!sendInt(socket_tcp,NOTIFY_OPP_TIMEOUT))	return -1;
 				wait_for_opponent(false);
 
 				in_game = false;				
@@ -718,16 +720,16 @@ int main(int argc,char **argv){
 		for(i = 0; i <= fdmax; i++){
 			if(FD_ISSET(i,&read_fds)){
 				if(i == 0){			//stdin
-					read_input(socket_server);					
+					read_input(socket_tcp);					
 					//continue;
-				} else if(i == socket_server) {			//server tcp
+				} else if(i == socket_tcp) {			//server tcp
 					if(!recvInt(i,&cmd))			return -1;
 					select_command_server(i,cmd);	
 				} else if(i == socket_udp){			//server udp
 					if(!recvUDPInt(i,&opponent,&cmd)){
-						protocol_error(socket_server);
+						protocol_error(socket_tcp);
 					}
-					select_command_udp(i,cmd,socket_server);	
+					select_command_udp(i,cmd,socket_tcp);	
 
 				}
 
