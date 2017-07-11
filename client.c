@@ -175,6 +175,10 @@ void cmd_connect(int sock){
 		case CONNECT_DATA:
 			handle_receive_data(sock);
 			break;
+		case CONN_LOST:
+			printf("L'utente si e' disconnesso\n");
+			return;
+			break;
 	}
 
 
