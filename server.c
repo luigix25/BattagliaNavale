@@ -112,8 +112,10 @@ void removeUser(int sock){
 		him->status = FREE;
 		printf("%s ha vinto!\n",him->username);			//il nome dell'avversario e' andato perso
 		printf("%s e' libero\n",him->username);
-
-
+	} else if(tmp->status == CONNECTING){
+		user *him = tmp->pending_request;
+		if(!sendInt(him->sock,CONN_LOST)) 		return;
+		him->status = FREE;
 	}
 	
 
@@ -188,14 +190,12 @@ void connect_function(int sock){
 	if(username == NULL)				return;	
 
 	me = searchUserBySocket(sock);			//se stesso
-	me->status = CONNECTING;
 	
 	if(strcmp(username,me->username) == 0){		//connessione a se stessi
 		if(!sendInt(sock,CONNECT_NOUSER))	return;
 		return;
 	}
 
-	
 	him = searchUserByName(username);		//non esiste
 
 	if(him == NULL){
@@ -210,6 +210,8 @@ void connect_function(int sock){
 		return;
 	}
 
+	me->status = CONNECTING;
+	him->status = CONNECTING;	
 	him->pending_request = me;
 	me->pending_request = him;
 
