@@ -20,7 +20,8 @@ int sendUDPInt(int sd,struct sockaddr_in *sv_addr,int value){
 
 int recvUDPInt(int sd,struct sockaddr_in *cl_addr,int *value){
 	uint32_t torecv;
-	int ret,addrlen;
+	int ret;
+	socklen_t addrlen;
 
 	addrlen = sizeof(cl_addr);
 
@@ -93,7 +94,8 @@ int sendUDPString(int sd,char *buffer,struct sockaddr_in *sv_addr){
 
 
 char* recvUDPString(int sd,struct sockaddr_in *cl_addr){
-	int ret,len,addrlen;
+	int ret,len;
+	socklen_t addrlen;
     	addrlen = sizeof(*cl_addr);
 
 	if(!recvUDPInt(sd,cl_addr,&len)){
@@ -143,4 +145,3 @@ int recvInt(int sd,int* val){
 	return (ret == sizeof(uint32_t));
 
 }
-
