@@ -22,6 +22,13 @@ char grid[6][6];			// - vuota; 0 nave integra; X nave colpita; T tentativi utent
 char grid_opponent[6][6];
 char *last_shot;
 
+void pulisci_buff(){
+	char c;
+	while((c = getchar()) != '\n' && c != EOF)
+		;
+
+}
+
 struct sockaddr_in setup_sockaddr(char *ip,int port){
 
 	struct sockaddr_in sv_addr;
@@ -323,9 +330,10 @@ void select_command(int sock,char *buffer){
 		cmd_quit(sock);
 	} else if(strcmp("!connect",buffer) == 0){
 		cmd_connect(sock);
-	} /*else {
+	} else {
 		printf("Comando non riconosciuto\n");
-	}*/
+		pulisci_buff(stdin);
+	}
 
 	free(buffer);
 
@@ -341,9 +349,10 @@ void select_command_game(int sock,char *buffer){
 		cmd_shot(sock);
 	} else if(strcmp("!show",buffer) == 0){
 		cmd_show();
-	} /*else {
+	} else {
 		printf("Comando non riconosciuto\n");
-	}*/
+		pulisci_buff(stdin);
+	}
 
 	free(buffer);
 
@@ -677,7 +686,8 @@ int main(int argc,char **argv){
 
 	fdmax = (socket_tcp > socket_udp)?socket_tcp:socket_udp;
 
-	struct timeval timeout = {10,0}; 
+	struct timeval timeout = {10,0}; 				
+#warning timeout_10_s
 
 
 	while(true){
