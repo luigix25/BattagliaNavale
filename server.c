@@ -328,6 +328,21 @@ void handle_timeout(int sock){
 }
 
 
+void handle_timeout_conn(int sock){
+
+	user *me,*him;
+	me = searchUserBySocket(sock);
+	him = me->pending_request;
+
+	him->status = me->status = FREE;
+
+	if(!sendInt(him->sock,CONNECT_TIMEOUT_REQ))				return;
+	
+	him->pending_request = me->pending_request = NULL;
+
+}
+
+
 void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 
 	switch (cmd){
@@ -357,6 +372,9 @@ void select_command(int cmd,int sock,struct sockaddr_in socket_full){
 			break;
 		case NOTIFY_OPP_TIMEOUT:
 			handle_timeout(sock);
+			break;
+		case CONNECT_TIMEOUT_REQ:
+			handle_timeout_conn(sock);
 			break;
 		}
 

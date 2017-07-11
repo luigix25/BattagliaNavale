@@ -1,6 +1,7 @@
 #include "library/library.h"
 
 #define N_NAVI 2
+#define TIMEOUT 50
 
 
 fd_set master;
@@ -184,6 +185,10 @@ void cmd_connect(int sock){
 			break;
 		case CONN_LOST:
 			printf("L'utente si e' disconnesso\n");
+			return;
+			break;
+		case CONNECT_TIMEOUT_REQ:
+			printf("L'utente non ha risposto\n");
 			return;
 			break;
 	}
@@ -403,12 +408,31 @@ void handle_connection_request(int sock){
 	
 	char *str = recvString(sock);
 	char answ = 'x';
+	char flush_;
+	fd_set read_fds,master_stdin;
+	FD_ZERO(&read_fds);
+	FD_ZERO(&master_stdin);
+	
+	FD_SET(0,&master_stdin);
+	read_fds = master_stdin;									// 0 è stdin
+
+	struct timeval timeout = {TIMEOUT,0}; 								//10 secondi
 
 	do{
 		printf("%s si vuole connettere a te, Accetti? (y/n)",str);
 		fflush(stdout);
-		getchar();				//flush per ritorno a capo
-		scanf("%c",&answ);
+	
+			if(select(1,&read_fds,NULL,NULL,&timeout) <=0){				//SISTEMARE TIMEOUT
+				printf("\nHai impiegato troppo tempo!\n");
+				if(!sendInt(sock,CONNECT_TIMEOUT_REQ))	return;
+				return;				
+			}
+			
+			//recvInt(0,&answ);		
+			read(0,&answ,1);			//leggo su stdin lunghezza1
+			read(0,&flush_,1);			//flush sul buffer
+		//	getchar();				//flush per ritorno a cap
+
 		
 	} while(answ != 'y' && answ != 'n');
 
@@ -617,6 +641,7 @@ void select_command_server(int socket,int cmd){
 			break;
 		case WON_RETIRED:
 			printf("Complimenti hai vinto! Il tuo avversario si e' ritirato\n");
+			wait_for_opponent(false);
 			in_game = false;
 			break;
 		case OPP_DISCONNECTED_TCP:
@@ -686,8 +711,7 @@ int main(int argc,char **argv){
 
 	fdmax = (socket_tcp > socket_udp)?socket_tcp:socket_udp;
 
-	struct timeval timeout = {10,0}; 				
-#warning timeout_10_s
+	struct timeval timeout = {TIMEOUT,0}; 				
 
 
 	while(true){
